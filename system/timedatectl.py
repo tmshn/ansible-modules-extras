@@ -46,9 +46,9 @@ def main():
     # * 'name' is not required key to construct AnsibleModule,
     #   but it is used to check if change will happen.
     arguments = dict(
-        ntp       = dict(default=None,  required=False, type='bool',    name='NTP enabled'),
-        time      = dict(default=None,  required=False, type='str',     name='Local time'),
-        timezone  = dict(default=None,  required=False, type='str',     name='Timezone'),
+        ntp      = dict(default=None, required=False, type='bool', name='NTP enabled'),
+        time     = dict(default=None, required=False, type='str',  name='Local time'),
+        timezone = dict(default=None, required=False, type='str',  name='Timezone'),
     )
 
     # Construct 'module'
@@ -57,33 +57,54 @@ def main():
         supports_check_mode = True,
         required_one_of     = [ arguments.keys() ],
     )
-    # Commands to execute to make some change.
-    # (shell command will be added if needed)
-    commands = []
 
-    # Check the current state
-    old_state = module.run_command('timedatectl status', check_rc=True)[1] # Get stdout
-    # module.exit_json(changed=False, msg=old_state)
+    # Get the current state from the stdout of status the command
+    old_state = module.run_command('timedatectl status', check_rc=True)[1]
+    # module.exit_json(changed=False, msg=old_state) # For debug
 
-    for arg,spec in arguments.iteritems():
-        # Check old value, which is written in `old_state`.
-        # Below regex is to find the value.
-        regex     = re.compile(spec['name']+r':\s*([^\n]+)\n')
-        old_value = regex.search(old_state).group(1)
-        new_value = module.params[arg]
-        if (new_value is not None) and (new_value not in old_value):
-            # then, change should happen!
-            commands.append('timedatectl set-%s %s' % (arg, new_value))
+    for arg,spec in arguments.items(): # use `items` instead of `iteritems` to delete safely
+        if module.params[arg] is None:
+            del arguments[arg]
+        else:
+            if spec['type']!='bool':
+                spec['new_value'] = module.params[arg]
+            else:
+                spec['new_value'] = 'yes' if module.params[arg] else 'no'
+            # Check the old value, which is written in `old_state`.
+            # Below regex is to find the value.
+            regex = re.compile(spec['name']+r':\s*([^\n]+)\n')
+            spec['old_value'] = regex.search(old_state).group(1)
+            if spec['new_value'] not in spec['old_value']:
+                # then, changes should happen!
+                spec['command'] = 'timedatectl set-%s %s' % (arg, spec['new_value'])
 
     # Make changes
     if not module.check_mode:
-        for command in commands:
-            module.run_command(command, check_rc=True)
+        for arg,spec in arguments.iteritems():
+            if 'command' in spec:
+                module.run_command(spec['command'], check_rc=True)
+        # Get the new state to compare the changes
+        new_state = module.run_command('timedatectl status', check_rc=True)[1]
+        for arg,spec in arguments.iteritems():
+            regex = re.compile(spec['name']+r':\s*([^\n]+)\n')
+            spec['new_value'] = regex.search(new_state).group(1)
 
-    # Check the current state and return.
-    new_state = module.run_command('timedatectl status', check_rc=True)[1] # Get stdout
-    message   = old_state + "\n|\nv\n\n" + new_state
-    module.exit_json(changed=( len(commands)>0 ), msg=message)
+
+    # Construct the message
+    message = '# Changes\n'
+    changed = False
+    for arg,spec in arguments.iteritems():
+        message += '  - '
+        if 'command' in spec:
+            changed = True
+            message += 'o'
+        else:
+            message += 'x'
+        message += ': ['+spec['name']+']\t'+spec['old_value']+' -> '+spec['new_value']+'\n'
+    message += '(x: not changed / o: changed)\n'
+
+    module.exit_json(changed=changed, msg=message)
+
 
 from ansible.module_utils.basic import *
 
