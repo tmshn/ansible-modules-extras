@@ -69,7 +69,11 @@ def main():
             if spec['type']!='bool':
                 spec['new_value'] = module.params[arg]
             else:
-                spec['new_value'] = 'yes' if module.params[arg] else 'no'
+                # spec['new_value'] = 'yes' if module.params[arg] else 'no'
+                if module.params[arg]:
+                    spec['new_value'] = 'yes'
+                else:
+                    spec['new_value'] = 'no'
             # Check the old value, which is written in `old_state`.
             # Below regex is to find the value.
             regex = re.compile(spec['name']+r':\s*([^\n]+)\n')
